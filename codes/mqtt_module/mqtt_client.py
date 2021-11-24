@@ -1,3 +1,6 @@
+# coding: UTF-8
+# Author: Yuri_Fanzhiweisss
+
 import paho.mqtt.client as mqtt
 from threading import Thread
 import argparse

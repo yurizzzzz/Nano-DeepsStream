@@ -1,5 +1,5 @@
 # coding: UTF-8
-# Author: Yuri_Fanzhiweisss
+# Author: Yuri_Fanzhiwei
 
 import paho.mqtt.client as mqtt
 from threading import Thread
@@ -48,6 +48,11 @@ def mqtt_get_message(mqtt_client, userdata, message):
     print("Recieved message: ", msg)
     
 
+def mqtt_create(ip, port, pub_topic, sub_topic):
+    client = mqtt_init(ip, port)
+    client = mqtt_subscribe(client, sub_topic)
+    client.on_message = mqtt_get_message
+    return client
 
 
 if __name__ == '__main__':

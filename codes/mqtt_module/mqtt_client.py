@@ -1,11 +1,12 @@
 # coding: UTF-8
 # Author: Yuri_Fanzhiwei
+# mqtt模块部分的调用代码
 
 import paho.mqtt.client as mqtt
 from threading import Thread
-import argparse
 import json
 
+# 初始化mqtt
 def mqtt_init(server_ip:str, server_port:int):
     # 创建mqtt
     mqtt_client = mqtt.Client(client_id=" ")
@@ -21,6 +22,7 @@ def mqtt_init(server_ip:str, server_port:int):
     mqtt_client.connect(server_ip, server_port, 60)
     return mqtt_client
 
+# 使mqtt有订阅模式
 def mqtt_subscribe(mqtt_client, sub_topic):
     # 订阅对应主题
     mqtt_client.subscribe(sub_topic, qos=0)
@@ -28,6 +30,7 @@ def mqtt_subscribe(mqtt_client, sub_topic):
     mqtt_client.loop_start()
     return mqtt_client
 
+# 使mqtt有发布模式
 def mqtt_publish(mqtt_client, pub_topic, pub_msg):
     # 对传入的数据进行json格式化即将字典格式转换为字符串
     publish_msg = json.dumps(pub_msg)
@@ -40,6 +43,7 @@ def mqtt_publish(mqtt_client, pub_topic, pub_msg):
     else:
         print('Sending failed')
 
+# 定义mqtt订阅模式中的接收信息方法
 def mqtt_get_message(mqtt_client, userdata, message):
     # 对接收的信息进行解码
     msg = message.payload.decode()
@@ -48,6 +52,7 @@ def mqtt_get_message(mqtt_client, userdata, message):
     print("Recieved message: ", msg)
     
 
+# 创建完整的mqtt客户端
 def mqtt_create(ip, port, pub_topic, sub_topic):
     client = mqtt_init(ip, port)
     client = mqtt_subscribe(client, sub_topic)
@@ -55,6 +60,7 @@ def mqtt_create(ip, port, pub_topic, sub_topic):
     return client
 
 
+# 测试mqtt模块
 if __name__ == '__main__':
     send_msg = {'path': '/2021', 'device': 'nano'}
     # 创建mqtt对象

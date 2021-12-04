@@ -1,3 +1,8 @@
+# coding: UTF-8
+# Author: Yuri_Fanzhiwei
+# 此代码仅作为mqtt模块的基础功能测试，无任何使用意义
+
+
 import paho.mqtt.client as mqtt
 from threading import Thread
 import argparse

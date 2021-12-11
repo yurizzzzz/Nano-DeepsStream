@@ -11,7 +11,7 @@ import gi
 gi.require_version('Gst', '1.0')
 
 import pyds
-from gi.repository import GObject, Gst
+from gi.repository import GObject, Gst, GLib
 from common.is_aarch_64 import is_aarch64
 from common.bus_call import bus_call
 from mqtt_module import mqtt_client
@@ -233,6 +233,14 @@ def infer_main(args, stats_queue: mp.Queue = None, e_ready: mp.Event = None):
 
     # 创建英伟达的硬件编码器，使用H264编码
     encoder = Gst.ElementFactory.make("nvv4l2h264enc", "encoder")
+    encoder.set_property("maxperf-enable", 1)
+    encoder.set_property("preset-level", 1)
+    encoder.set_property("profile", 4)
+    # encoder.set_property("bufapi-version", 1)
+    # encoder.set_property("insert-sps-pps", 1)
+    encoder.set_property("iframeinterval", 500)
+    encoder.set_property("control-rate", 1)
+    encoder.set_property("bitrate", 2000000)
 
     # 创建传输视频流的队列
     queue = Gst.ElementFactory.make("queue")

@@ -14,12 +14,96 @@ from gi.repository import GObject, Gst, GLib
 from common.is_aarch_64 import is_aarch64
 from common.bus_call import bus_call
 from mqtt_module import mqtt_client
+from filesave import filesaving
 import multiprocessing as mp
+from datetime import datetime, timedelta
 import pyds
+import os
+import sys
+import struct
+import socket
+
+active_filesave_processes = []
+flag = [0]
 
 
 CLASS_PERSON = 0
 NO_MASK = 1
+
+
+def saveFile_process(saveFile_name, udp_port):
+
+    interrupt_process = mp.Event()
+    filesave_process = mp.Process(target=filesaving.main, args=(saveFile_name, udp_port, interrupt_process))
+    filesave_process.start()
+
+    return filesave_process, interrupt_process
+
+
+def finish_filesave_process(active_process):
+    active_process["interrupt"].set()
+    active_process["process_handler"].join(timeout=10)
+    active_process["process_handler"].terminate()
+
+    try:
+        # 连接云服务器端
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect(('59.110.7.232', 8888))
+    except socket.error as msg:
+        print(msg)
+        sys.exit(1)
+    print(s.recv(1024))
+
+    # 设置文件名
+    filepath = './output.mp4'
+
+    if os.path.isfile(filepath):
+        # 获取文件名并用UTF-8编码
+        filein_size = struct.calcsize('128sl')
+        ahead = struct.pack('128sq', os.path.basename(filepath).encode('utf-8'), os.stat(filepath).st_size)
+        s.send(ahead)
+        fp = open(filepath, 'rb')
+        # 文件会被隔断分批次发送
+        # 进入循环发送文件直到文件发送完毕
+        while 1:
+            data = fp.read(1024)
+            if not data:
+                print('{0} file send over...'.format(os.path.basename(filepath)))
+                break
+            s.send(data)
+        s.close()
+    flag[0] = 0
+
+
+
+def filesaving_process(period, duration):
+    if flag[0] == 0:
+        return
+
+    period = timedelta(seconds=period)
+    duration = timedelta(seconds=duration)
+    latest_start = None
+
+    for idx, active_process in enumerate(active_filesave_processes):
+        if datetime.now() - active_process["start_time"] >= duration:
+            finish_filesave_process(active_process)
+            del active_filesave_processes[idx]
+            return 
+        if latest_start == None or active_process["start_time"] > latest_start:
+            latest_start = active_process["start_time"]
+
+    if latest_start is None or (datetime.now() - latest_start >= period):
+        output_name = "/home/nvidia/Nano/codes/nvinfer_mask/output.mp4"
+        port = 8001
+        file_process, file_interrupt = saveFile_process(output_name, port)
+        # file_process = mp.Process(target=filesaving.main, args=(output_name, port))
+        # file_process.start()
+
+        latest_start = datetime.now()
+        active_filesave_processes.append(dict(start_time=latest_start, process_handler=file_process, interrupt=file_interrupt))
+
+
+
 
 # 接收检测信息满足要求则利用MQTT发送警报到服务器
 def handle_statistics(client, stats_queue, send_msg):
@@ -30,6 +114,7 @@ def handle_statistics(client, stats_queue, send_msg):
         alert = False
         if person_nums % 30==0 and person_nums != 0:
             alert = True
+            flag[0] = 1
 
         if alert:
             alert = False
@@ -37,6 +122,7 @@ def handle_statistics(client, stats_queue, send_msg):
             if client is not None:
                 print('ALERT')
                 mqtt_client.mqtt_publish(client, '/pub', send_msg)
+        
 
 # 定义需要检测的目标的类，并且创建类以类中属性作为整个程序的全局变量
 class Person:
@@ -55,7 +141,7 @@ def cb_add_statistics(cb_args):
         stats_queue.put_nowait({"People_nums": num})
 
     # print("person num: ", num)
-    GLib.timeout_add_seconds(0.5, cb_add_statistics, cb_args)
+    GLib.timeout_add_seconds(1, cb_add_statistics, cb_args)
 
 
 # 探针方法，插入pipeline中对视频帧进行目标检测，并将检测结果附到视频帧上去
@@ -124,7 +210,8 @@ def osd_sink_pad_buffer_probe(pad, info, cb_args):
         display_meta.num_labels = 1
         py_nvosd_text_params = display_meta.text_params[0]
 
-        py_nvosd_text_params.display_text = "Frame Number={} Person_count={}".format(frame_number, obj_counter[CLASS_PERSON])
+        # py_nvosd_text_params.display_text = "Frame Number={} Person_count={}".format(frame_number, obj_counter[CLASS_PERSON])
+        py_nvosd_text_params.display_text = "Frame Number={}".format(frame_number)
 
         # 设置显示信息出现的位置坐标，左上角是坐标轴原点，设置offset偏移量
         py_nvosd_text_params.x_offset = 10
@@ -228,6 +315,7 @@ def main(args , stats_queue: mp.Queue = None, e_ready: mp.Event = None):
     caps.set_property("caps", Gst.Caps.from_string("video/x-raw(memory:NVMM), format=I420"))
      # 创建英伟达的硬件编码器，使用H264编码
     encoder = Gst.ElementFactory.make("nvv4l2h264enc", "encoder")
+    encoder.set_property("insert-sps-pps", True)
     encoder.set_property("maxperf-enable", 1)
     encoder.set_property("preset-level", 1)
     encoder.set_property("profile", 4)
@@ -236,6 +324,21 @@ def main(args , stats_queue: mp.Queue = None, e_ready: mp.Event = None):
     encoder.set_property("iframeinterval", 500)
     encoder.set_property("control-rate", 1)
     encoder.set_property("bitrate", 2000000)
+
+    # 创建RTP数据包将H264编码转换为RTP数据包
+    rtppay = Gst.ElementFactory.make("rtph264pay")
+    # 创建流分支
+    splitter_file_udp = Gst.ElementFactory.make("tee")
+    # 创建传输UDP流队列
+    queue_udp = Gst.ElementFactory.make("queue")
+
+    # UDP本地传输的端口
+    client_list = [f"127.0.0.1:8001"]
+    multiudpsink = Gst.ElementFactory.make("multiudpsink")
+    multiudpsink.set_property("clients", ",".join(client_list))
+    multiudpsink.set_property("async", False)
+    multiudpsink.set_property("sync", True)
+
 
     # 创建传输视频流的队列
     queue = Gst.ElementFactory.make("queue")
@@ -284,6 +387,12 @@ def main(args , stats_queue: mp.Queue = None, e_ready: mp.Event = None):
     pipeline.add(nvvidconv_postosd)
     pipeline.add(caps)
     pipeline.add(encoder)
+
+    pipeline.add(splitter_file_udp)
+    pipeline.add(queue_udp)
+    pipeline.add(rtppay)
+    pipeline.add(multiudpsink)
+
     pipeline.add(queue)
     pipeline.add(h264parse)
     pipeline.add(flvmux)
@@ -321,7 +430,17 @@ def main(args , stats_queue: mp.Queue = None, e_ready: mp.Event = None):
 
     nvvidconv_postosd.link(caps)
     caps.link(encoder)
-    encoder.link(queue)
+
+    encoder.link(splitter_file_udp)
+    tee_rtmp = splitter_file_udp.get_request_pad("src_%u")
+    tee_udp = splitter_file_udp.get_request_pad("src_%u")
+
+    tee_udp.link(queue_udp.get_static_pad("sink"))
+    queue_udp.link(rtppay)
+    rtppay.link(multiudpsink)
+
+    # encoder.link(queue)
+    tee_rtmp.link(queue.get_static_pad("sink"))
     queue.link(h264parse)
     h264parse.link(flvmux)
     flvmux.link(sink)
@@ -370,5 +489,5 @@ if __name__ == '__main__':
     # main(sys.argv, stats_queue)
     while True:
         handle_statistics(client, stats_queue, send_msg)
+        filesaving_process(60, 20)
         
-

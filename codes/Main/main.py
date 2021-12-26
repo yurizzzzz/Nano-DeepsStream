@@ -16,6 +16,7 @@ from filesave import filesaving
 import multiprocessing as mp
 import struct
 import socket
+import time
 import pyds
 import sys
 import os
@@ -24,7 +25,7 @@ import os
 active_filesave_processes = []
 flag = [0]
 
-def handle_statistics(client, stats_queue, send_msg):
+def handle_statistics(client, stats_queue):
     while not stats_queue.empty():
         statistics = stats_queue.get_nowait()
 
@@ -39,6 +40,11 @@ def handle_statistics(client, stats_queue, send_msg):
             print(person_nums)
             if client is not None:
                 print('ALERT')
+                
+                time_now = time.strftime("%Y,%m-%d,%H-%M", time.localtime())
+                time_now = time_now.split(',')
+                file_path = '/home/ubuntu/' + time_now[0] + '/' + time_now[1] + '/' + time_now[2]
+                send_msg = {'Warning': 'NoMask', 'Path': file_path}
                 mqtt_client.mqtt_publish(client, '/pub', send_msg)
 
 
@@ -121,5 +127,5 @@ if __name__ == '__main__':
     main_process.start()
     # main(sys.argv, stats_queue)
     while True:
-        handle_statistics(client, stats_queue, send_msg)
+        handle_statistics(client, stats_queue)
         filesaving_process(60, 35)

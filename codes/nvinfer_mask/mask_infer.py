@@ -141,7 +141,7 @@ def cb_add_statistics(cb_args):
         stats_queue.put_nowait({"People_nums": num})
 
     # print("person num: ", num)
-    GLib.timeout_add_seconds(1, cb_add_statistics, cb_args)
+    GLib.timeout_add(500, cb_add_statistics, cb_args)
 
 
 # 探针方法，插入pipeline中对视频帧进行目标检测，并将检测结果附到视频帧上去
@@ -465,7 +465,7 @@ def main(args , stats_queue: mp.Queue = None, e_ready: mp.Event = None):
     try:
         # 实时传递检测的信息
         cb_args = person, stats_queue
-        GLib.timeout_add_seconds(1, cb_add_statistics, cb_args)
+        GLib.timeout_add(500, cb_add_statistics, cb_args)
         loop.run()
     except:
         pass

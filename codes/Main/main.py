@@ -1,6 +1,6 @@
 # Coding: UTF-8
 # Author: Yuri_Fanzhiwei
-# Action: Main execution code
+# Action: 主程序
 
 import sys
 sys.path.append('../')
@@ -14,18 +14,45 @@ from nvinfer_mask import mask_infer
 from mqtt_module import mqtt_client
 from file_module import filesaving, file_process
 import multiprocessing as mp
+import threading
+import argparse
 import struct
 import socket
+import signal
 import time
 import pyds
 import sys
 import os
 
 
-# active_filesave_processes = []
-# flag = [0]
+external_interrupt = threading.Event()
 
-def handle_statistics(client, stats_queue, active_filesave_processes):
+def signal_handler(sig, frame):
+    """
+    该函数是signal处理信号发生时候调用的处理函数，当按下CTRL+C
+    的时候接收到中断信号并设置中断标志为True
+
+    @Param sig: signal处理的信号编号
+    @Param frame: signal处理的程序帧
+
+    """
+
+    print("\nCTRL-C Stop the Code!")
+    external_interrupt.set()
+
+
+def process_info(client, stats_queue, active_filesave_processes, pub_topic):
+    """
+    该函数通过队列获取到主进程中检测的信息，并且判断是否发生异常，若发现异常则
+    令MQTT对象发送异常信息报警到云端，同时也令视频保存流保存相对应异常的视频。
+
+    @Param client: 传入的初始化好的MQTT对象
+    @Param stats_queue: 存放主进程中的检测信息的队列
+    @Param active_filesave_processes: 目前正在运行的视频保存流进程
+    @Param pub_topic: MQTT发布的主题
+
+    """
+
     while not stats_queue.empty():
         statistics = stats_queue.get_nowait()
 
@@ -34,7 +61,6 @@ def handle_statistics(client, stats_queue, active_filesave_processes):
         if person_nums % 30==0 and person_nums != 0:
             alert = True
             file_process.saveFile_flag(active_filesave_processes)
-            # flag[0] = 1
 
         if alert:
             alert = False
@@ -46,90 +72,71 @@ def handle_statistics(client, stats_queue, active_filesave_processes):
                 time_now = time_now.split(',')
                 file_path = '/home/ubuntu/' + time_now[0] + '/' + time_now[1] + '/' + time_now[2]
                 send_msg = {'Warning': 'NoMask', 'Path': file_path}
-                mqtt_client.mqtt_publish(client, '/pub', send_msg)
+                mqtt_client.mqtt_publish(client, pub_topic, send_msg)
 
 
-""" def saveFile_process(saveFile_name, udp_port):
+def input_args():
+    """
+    该函数为主程序传入需要的参数
+    
+    @Param port: 传入云服务器端的EMQX开放端口
+    @Param sub_topic: MQTT对象订阅的主题
+    @Param pub_topic: MQTT对象发布的主题关于异常告警
+    @Param ip: 云服务器端的公网IP
+    @Param file_period: 视频文件保存的周期(秒)
+    @Param file_duration: 一个视频文件的保存的时长(秒)
 
-    interrupt_process = mp.Event()
-    filesave_process = mp.Process(target=filesaving.main, args=(saveFile_name, udp_port, interrupt_process))
-    filesave_process.start()
+    """
+    parser = argparse.ArgumentParser()
 
-    return filesave_process, interrupt_process
+    parser.add_argument("--sensor_id", type=int, default=0,
+                        help="Set the cloud server's port")
+    parser.add_argument("--port", type=int, default=1883,
+                        help="Set the cloud server's port")
+    parser.add_argument("--sub_topic", type=str, default="/sub",
+                        help="The MQTT object's subscribe topic")
+    parser.add_argument("--pub_topic", type=str, default="/pub",
+                        help="The MQTT object's published topic")
+    parser.add_argument("--ip", type=str, default="101.43.152.188",
+                        help="Set the cloud server's IP")
+    parser.add_argument("--file_period", type=int, default=60,
+                        help="Set the the filesaving period")
+    parser.add_argument("--file_duration", type=int, default=35,
+                        help="Set the the filesaving duration")
 
-
-def finish_filesave_process(active_process):
-    active_process["interrupt"].set()
-    active_process["process_handler"].join(timeout=10)
-    active_process["process_handler"].terminate()
-
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect(('101.43.152.188', 8888))
-    except socket.error as msg:
-        print(msg)
-        sys.exit(1)
-    print(s.recv(1024))
-
-    filepath = './output.mp4'
-
-    if os.path.isfile(filepath):
-        filein_size = struct.calcsize('128sl')
-        ahead = struct.pack('128sq', os.path.basename(filepath).encode('utf-8'), os.stat(filepath).st_size)
-        s.send(ahead)
-        fp = open(filepath, 'rb')
-        while 1:
-            data = fp.read(1024)
-            if not data:
-                print('{0} file send over...'.format(os.path.basename(filepath)))
-                break
-            s.send(data)
-        s.close()
-    flag[0] = 0
-
-
-def filesaving_process(period, duration):
-    if flag[0] == 0:
-        return
-
-    period = timedelta(seconds=period)
-    duration = timedelta(seconds=duration)
-    latest_start = None
-
-    for idx, active_process in enumerate(active_filesave_processes):
-        if datetime.now() - active_process["start_time"] >= duration:
-            finish_filesave_process(active_process)
-            del active_filesave_processes[idx]
-            return 
-        if latest_start == None or active_process["start_time"] > latest_start:
-            latest_start = active_process["start_time"]
-
-    if latest_start is None or (datetime.now() - latest_start >= period):
-        output_name = "/home/nvidia/Nano/codes/Main/output.mp4"
-        port = 8001
-        file_process, file_interrupt = saveFile_process(output_name, port)
-        # file_process = mp.Process(target=filesaving.main, args=(output_name, port))
-        # file_process.start()
-
-        latest_start = datetime.now()
-        active_filesave_processes.append(dict(start_time=latest_start, process_handler=file_process, interrupt=file_interrupt))
- """
+    return parser.parse_args()
 
 if __name__ == '__main__':
-    # send_msg = {'Warning': 'NoMask', 'Path': '/home/2021'}
-    ip = "101.43.152.188"
-    port = 1883
-    client = mqtt_client.mqtt_init(ip, port)
-    client = mqtt_client.mqtt_subscribe(client, '/sub')
+    """
+    整个项目的主运行程序,主运行代码的实现基本流程是:
+    MQTT对象初始化-->初始化消息队列-->启动主进程-->
+    进入循环处理检测信息-->发送消息和视频文件保存
+
+    """
+    
+    # port = 1883
+    # sub_topic = "/sub"
+    # pub_topic = "/pub"
+    # ip = "101.43.152.188"
+    # file_period = 60
+    # file_duration = 35 
+
+    args = input_args()
+
+    active_filesave_processes = []
+    signal.signal(signal.SIGINT, signal_handler)
+
+    client = mqtt_client.mqtt_init(args.ip, args.port)
+    client = mqtt_client.mqtt_subscribe(client, args.sub_topic)
     client.on_message = mqtt_client.mqtt_get_message
 
     stats_queue = mp.Queue(maxsize=5)
-    main_process = mp.Process(target=mask_infer.infer_main, args=(sys.argv, stats_queue))
+    main_process = mp.Process(target=mask_infer.infer_main, args=(args, stats_queue))
     main_process.start()
-    # main(sys.argv, stats_queue)
 
-    active_filesave_processes = []
+    while not external_interrupt.is_set():
+        process_info(client, stats_queue, active_filesave_processes, args.pub_topic)
+        file_process.saveFile_start(args.file_period, args.file_duration, active_filesave_processes)
 
-    while True:
-        handle_statistics(client, stats_queue, active_filesave_processes)
-        file_process.saveFile_start(60, 35, active_filesave_processes)
+    for process in active_filesave_processes:
+        file_process.saveFile_end(process)

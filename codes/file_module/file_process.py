@@ -21,14 +21,26 @@ import sys
 import os
 
 
-# active_filesave_processes = []
-
 def saveFile_flag(active_filesave_processes):
+    """
+    该函数标记每个视频文件保存进程中是否保存的标志
+
+    @Param active_filesave_processes: 正在运行的视频文件保存进程集合
+
+    """
+
     for process in active_filesave_processes:
         process["save_flag"] = True
 
 
 def saveFile_process(saveFile_name, udp_port):
+    """
+    该函数是启动视频文件保存的进程并且返回进程和中断符队列
+
+    @Param saveFile_name: 保存的视频文件名
+    @Param udp_port: 传输到云服务器的端口号
+
+    """
 
     interrupt_process = mp.Event()
     filesave_process = mp.Process(target=filesaving.main, args=(saveFile_name, udp_port, interrupt_process))
@@ -38,6 +50,14 @@ def saveFile_process(saveFile_name, udp_port):
 
 
 def saveFile_end(active_process):
+    """
+    该函数中止视频文件保存进程并且在中止后根据是否保存的标识符去选择
+    传输文件到远程服务器还是删除掉不保存的视频文件
+
+    @Param active_process: 需要被终止掉的视频文件保存进程
+
+    """
+
     active_process["interrupt"].set()
     active_process["process_handler"].join(timeout=10)
     active_process["process_handler"].terminate()
@@ -75,6 +95,16 @@ def saveFile_end(active_process):
 
 
 def saveFile_start(period, duration, active_filesave_processes):
+    """
+    该函数初始化视频文件保存进程，并且初始化开始时间，保存标志等参数
+    并且根据保存时间，周期来决定是否终止或者开始新的视频文件保存进程
+
+    @Param period: 视频文件保存的周期(秒)
+    @Param duration: 一个视频文件保存的时长(秒)
+    @Param active_filesave_processes: 需要被终止掉的视频文件保存进程
+
+    """
+
     period = timedelta(seconds=period)
     duration = timedelta(seconds=duration)
     latest_start = None

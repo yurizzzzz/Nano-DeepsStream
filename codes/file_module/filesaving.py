@@ -2,7 +2,7 @@
 # Author: Yuri_Fanzhiwei
 # 告警视频文件保存模块
 
-# 将文件夹内的包加入到路径下
+
 import sys
 sys.path.append('../')
 

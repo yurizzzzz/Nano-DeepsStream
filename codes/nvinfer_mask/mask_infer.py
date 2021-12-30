@@ -1,6 +1,7 @@
 # coding: UTF-8
 # Author: Yuri_Fanzhiwei
-# 视频帧推理和推流部分模块
+# Action: 视频帧推理和推流部分模块
+
 
 # 将文件夹内的包加入到路径下
 import sys
@@ -11,102 +12,35 @@ import gi
 gi.require_version('Gst', '1.0')
 
 from gi.repository import GObject, Gst, GLib
+from datetime import datetime, timedelta
 from common.is_aarch_64 import is_aarch64
 from common.bus_call import bus_call
 from mqtt_module import mqtt_client
-from filesave import filesaving
+from file_module import filesaving
+from file_module import file_process
 import multiprocessing as mp
-from datetime import datetime, timedelta
-import pyds
-import os
-import sys
+import argparse
 import struct
 import socket
-
-active_filesave_processes = []
-flag = [0]
+import pyds
+import sys
+import os
 
 
 CLASS_PERSON = 0
 NO_MASK = 1
 
-
-def saveFile_process(saveFile_name, udp_port):
-
-    interrupt_process = mp.Event()
-    filesave_process = mp.Process(target=filesaving.main, args=(saveFile_name, udp_port, interrupt_process))
-    filesave_process.start()
-
-    return filesave_process, interrupt_process
-
-
-def finish_filesave_process(active_process):
-    active_process["interrupt"].set()
-    active_process["process_handler"].join(timeout=10)
-    active_process["process_handler"].terminate()
-
-    try:
-        # 连接云服务器端
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect(('59.110.7.232', 8888))
-    except socket.error as msg:
-        print(msg)
-        sys.exit(1)
-    print(s.recv(1024))
-
-    # 设置文件名
-    filepath = './output.mp4'
-
-    if os.path.isfile(filepath):
-        # 获取文件名并用UTF-8编码
-        filein_size = struct.calcsize('128sl')
-        ahead = struct.pack('128sq', os.path.basename(filepath).encode('utf-8'), os.stat(filepath).st_size)
-        s.send(ahead)
-        fp = open(filepath, 'rb')
-        # 文件会被隔断分批次发送
-        # 进入循环发送文件直到文件发送完毕
-        while 1:
-            data = fp.read(1024)
-            if not data:
-                print('{0} file send over...'.format(os.path.basename(filepath)))
-                break
-            s.send(data)
-        s.close()
-    flag[0] = 0
-
-
-
-def filesaving_process(period, duration):
-    if flag[0] == 0:
-        return
-
-    period = timedelta(seconds=period)
-    duration = timedelta(seconds=duration)
-    latest_start = None
-
-    for idx, active_process in enumerate(active_filesave_processes):
-        if datetime.now() - active_process["start_time"] >= duration:
-            finish_filesave_process(active_process)
-            del active_filesave_processes[idx]
-            return 
-        if latest_start == None or active_process["start_time"] > latest_start:
-            latest_start = active_process["start_time"]
-
-    if latest_start is None or (datetime.now() - latest_start >= period):
-        output_name = "/home/nvidia/Nano/codes/nvinfer_mask/output.mp4"
-        port = 8001
-        file_process, file_interrupt = saveFile_process(output_name, port)
-        # file_process = mp.Process(target=filesaving.main, args=(output_name, port))
-        # file_process.start()
-
-        latest_start = datetime.now()
-        active_filesave_processes.append(dict(start_time=latest_start, process_handler=file_process, interrupt=file_interrupt))
-
-
-
-
-# 接收检测信息满足要求则利用MQTT发送警报到服务器
 def handle_statistics(client, stats_queue, send_msg):
+    """
+    该函数通过队列获取到主进程中检测的信息，并且判断是否发生异常，若发现异常则
+    令MQTT对象发送异常信息报警到云端，同时也令视频保存流保存相对应异常的视频。
+
+    @Param client: 传入的初始化好的MQTT对象
+    @Param stats_queue: 存放主进程中的检测信息的队列
+    @Param send_msg: MQTT发送的异常告警信息
+
+    """
+
     while not stats_queue.empty():
         statistics = stats_queue.get_nowait()
 
@@ -114,7 +48,6 @@ def handle_statistics(client, stats_queue, send_msg):
         alert = False
         if person_nums % 30==0 and person_nums != 0:
             alert = True
-            flag[0] = 1
 
         if alert:
             alert = False
@@ -124,28 +57,48 @@ def handle_statistics(client, stats_queue, send_msg):
                 mqtt_client.mqtt_publish(client, '/pub', send_msg)
         
 
-# 定义需要检测的目标的类，并且创建类以类中属性作为整个程序的全局变量
 class Person:
+    """
+    定义需要检测的目标的类，并且创建类以类中属性作为整个程序的全局变量
+
+    """
+
     def __init__(self, count):
         self.count = count
 
 
-# MQTT模块和推理检测模块中间传递消息的模块，这里传递的消息就是以上述类
-# 作为全局变量进行传递交换信息
-# 使用GLib.timeout_add_seconds让该方法在程序的后台作为单独的子线程进
-# 行运算，使得该方法每隔固定时间调用一次进行传递消息
 def cb_add_statistics(cb_args):
+    """
+    MQTT模块和推理检测模块中间传递消息的模块，这里传递的消息就是以上述类
+    作为全局变量进行传递交换信息使用GLib.timeout_add_seconds让该方法在
+    程序的后台作为单独的子线程进行运算，使得该方法每隔固定时间调用一次进
+    行传递消息
+
+    @Param cb_args: 总共包含两个参数，一个是检测信息的另一个是消息队列
+
+    """
+
     person, stats_queue  = cb_args
     num = person.count
     if not stats_queue.full():
         stats_queue.put_nowait({"People_nums": num})
 
     # print("person num: ", num)
-    GLib.timeout_add(500, cb_add_statistics, cb_args)
+    # GLib.timeout_add_seconds(1, cb_add_statistics, cb_args)
+    GLib.timeout_add(100, cb_add_statistics, cb_args)
 
 
-# 探针方法，插入pipeline中对视频帧进行目标检测，并将检测结果附到视频帧上去
 def osd_sink_pad_buffer_probe(pad, info, cb_args):
+    """
+    探针方法，插入pipeline中对视频帧进行目标检测，并将检测结果附到视频帧上去
+
+    @Param pad: none
+    @Param info: 存放视频帧信息
+    @Param cb_args: 包含类变量参数和异常符参数
+
+    """
+
+
     # 检测框数
     num_rects=0
     # 视频帧数
@@ -236,14 +189,28 @@ def osd_sink_pad_buffer_probe(pad, info, cb_args):
     return Gst.PadProbeReturn.OK	
 
 
-def main(args , stats_queue: mp.Queue = None, e_ready: mp.Event = None):
+def infer_main(args, stats_queue: mp.Queue = None, e_ready: mp.Event = None):
+    """
+    模型推理和推流的主运行函数，从创建GStreamer管道到各种插件设置以及模型推理预测
+    最后编码通过RTMP推流传输到云服务器上，同时还有一条UDP流推到本地端为视频文件保
+    存进程服务
+
+    @Param args: 主要传入要使用的摄像头的编号
+    @Param stats_queue: 传输交流检测信息的队列
+    @Param e_ready: 异常符
+
+    """
+
     # 初始化目标类
     person = Person(0)
 
     # 如果输入参数错误报错
-    if len(args) != 2:
-        sys.stderr.write("usage: %s <v4l2-device-path>\n" % args[0])
+    if args.sensor_id == None:
+        sys.stderr.write("No input sendor id!\n")
         sys.exit(1)
+    # if len(args) != 2:
+    #     sys.stderr.write("usage: %s <v4l2-device-path>\n" % args[0])
+    #     sys.exit(1)
 
     # 初始化GStreamer
     GObject.threads_init()
@@ -261,7 +228,7 @@ def main(args , stats_queue: mp.Queue = None, e_ready: mp.Event = None):
     if not source:
         sys.stderr.write(" Unable to create Source \n")
     
-    source.set_property("sensor-id", int(args[1]))
+    source.set_property("sensor-id", int(args.sensor_id))
     source.set_property("bufapi-version", 1)
     
     # 创建摄像头滤波器，主要是为了传递视频数据
@@ -321,9 +288,9 @@ def main(args , stats_queue: mp.Queue = None, e_ready: mp.Event = None):
     encoder.set_property("profile", 4)
     # encoder.set_property("bufapi-version", 1)
     # encoder.set_property("insert-sps-pps", 1)
-    encoder.set_property("iframeinterval", 500)
-    encoder.set_property("control-rate", 1)
-    encoder.set_property("bitrate", 2000000)
+    encoder.set_property("iframeinterval", 100)
+    encoder.set_property("control-rate", 0)
+    # encoder.set_property("bitrate", 1000000)
 
     # 创建RTP数据包将H264编码转换为RTP数据包
     rtppay = Gst.ElementFactory.make("rtph264pay")
@@ -354,12 +321,12 @@ def main(args , stats_queue: mp.Queue = None, e_ready: mp.Event = None):
     # 创建RTMP的接收器，准备通过RTMP把视频流推到流媒体服务器
     print("Creating EGLSink \n")
     sink = Gst.ElementFactory.make("rtmpsink")
-    sink.set_property("location", "rtmp://59.110.7.232:1935/rtmplive")
+    sink.set_property("location", "rtmp://101.43.152.188:1935/rtmplive")
     if not sink:
         sys.stderr.write(" Unable to create egl sink \n")
 
     # 摄像头开始运行，并设置其图像宽度和高度以及采集的视频帧率
-    print("Playing cam %s " %args[1])
+    print("Playing cam %s " % str(args.sensor_id))
     caps_v4l2src.set_property('caps', Gst.Caps.from_string("video/x-raw(memory:NVMM), framerate=30/1"))
     caps_vidconvsrc.set_property('caps', Gst.Caps.from_string("video/x-raw(memory:NVMM)"))
     # source.set_property('device', args[1])
@@ -472,22 +439,36 @@ def main(args , stats_queue: mp.Queue = None, e_ready: mp.Event = None):
     pipeline.set_state(Gst.State.NULL)
 
 
+def input_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--sensor_id", type=int, default=0,
+                        help="Set the cloud server's port")
+
+    return parser.parse_args()
 
 
 
 if __name__ == '__main__':
-    send_msg = {'path': '/2021', 'device': 'nano'}
-    ip = "59.110.7.232"
+    """
+    测试模型推流和推流部分的代码运行正常，实现简单的模型推理推流然后
+    检测到异常信息通过MQTT发送
+
+    """
+
+    args = input_args()
+
+    send_msg = {'Warning': 'NoMask', 'Path': '/home/2021'}
+    ip = "101.43.152.188"
     port = 1883
     client = mqtt_client.mqtt_init(ip, port)
     client = mqtt_client.mqtt_subscribe(client, '/sub')
     client.on_message = mqtt_client.mqtt_get_message
 
     stats_queue = mp.Queue(maxsize=5)
-    main_process = mp.Process(target=main, args=(sys.argv, stats_queue))
+    main_process = mp.Process(target=infer_main, args=(args, stats_queue))
     main_process.start()
     # main(sys.argv, stats_queue)
     while True:
         handle_statistics(client, stats_queue, send_msg)
-        filesaving_process(60, 20)
         

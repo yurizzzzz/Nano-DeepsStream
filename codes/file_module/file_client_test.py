@@ -1,5 +1,7 @@
-# coding:UTF-8
-# Author:小范同学
+# Coding : UTF-8
+# Author : Yuri_FanZhiwei
+# Action : 此文件是用来测试从Nano端发送文件到远程云服务器可行性
+#          实现方式使用基于TCP连接的Socket传输数据文件
 
 import os
 import sys

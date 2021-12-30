@@ -1,6 +1,6 @@
 # Coding: UTF-8
 # Author: Yuri_Fanzhiwei
-# Function: Main execution code
+# Action: Main execution code
 
 import sys
 sys.path.append('../')
@@ -12,7 +12,7 @@ from gi.repository import GObject, Gst, GLib
 from datetime import datetime, timedelta
 from nvinfer_mask import mask_infer
 from mqtt_module import mqtt_client
-from filesave import filesaving
+from file_module import filesaving, file_process
 import multiprocessing as mp
 import struct
 import socket
@@ -22,10 +22,10 @@ import sys
 import os
 
 
-active_filesave_processes = []
-flag = [0]
+# active_filesave_processes = []
+# flag = [0]
 
-def handle_statistics(client, stats_queue):
+def handle_statistics(client, stats_queue, active_filesave_processes):
     while not stats_queue.empty():
         statistics = stats_queue.get_nowait()
 
@@ -33,7 +33,8 @@ def handle_statistics(client, stats_queue):
         alert = False
         if person_nums % 30==0 and person_nums != 0:
             alert = True
-            flag[0] = 1
+            file_process.saveFile_flag(active_filesave_processes)
+            # flag[0] = 1
 
         if alert:
             alert = False
@@ -48,7 +49,7 @@ def handle_statistics(client, stats_queue):
                 mqtt_client.mqtt_publish(client, '/pub', send_msg)
 
 
-def saveFile_process(saveFile_name, udp_port):
+""" def saveFile_process(saveFile_name, udp_port):
 
     interrupt_process = mp.Event()
     filesave_process = mp.Process(target=filesaving.main, args=(saveFile_name, udp_port, interrupt_process))
@@ -112,10 +113,10 @@ def filesaving_process(period, duration):
 
         latest_start = datetime.now()
         active_filesave_processes.append(dict(start_time=latest_start, process_handler=file_process, interrupt=file_interrupt))
-
+ """
 
 if __name__ == '__main__':
-    send_msg = {'Warning': 'NoMask', 'Path': '/home/2021'}
+    # send_msg = {'Warning': 'NoMask', 'Path': '/home/2021'}
     ip = "101.43.152.188"
     port = 1883
     client = mqtt_client.mqtt_init(ip, port)
@@ -126,6 +127,9 @@ if __name__ == '__main__':
     main_process = mp.Process(target=mask_infer.infer_main, args=(sys.argv, stats_queue))
     main_process.start()
     # main(sys.argv, stats_queue)
+
+    active_filesave_processes = []
+
     while True:
-        handle_statistics(client, stats_queue)
-        filesaving_process(60, 35)
+        handle_statistics(client, stats_queue, active_filesave_processes)
+        file_process.saveFile_start(60, 35, active_filesave_processes)

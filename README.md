@@ -68,3 +68,33 @@ sudo chmod a+x start.sh
 ```
 
 - 重启测试
+
+# 如何部署整个项目
+
+- 安装好DeepStream6.0[官方安装文档](https://docs.nvidia.com/metropolis/deepstream/dev-guide/text/DS_Quickstart.html#jetson-setup)
+- 安装好Gst-Python(Jetson系列板子已经自带了所以没必要再安装)
+
+```
+如果没装
+sudo apt update
+sudo apt install python3-gi python3-dev python3-gst-1.0 -y
+```
+
+- 安装好Python3.6(Jetson系列板子已经自带)
+- 安装好Ubuntu18.04(Jetson系列板子已经自带)
+
+- DeepStream Python bindings[官方参考](https://github.com/NVIDIA-AI-IOT/deepstream_python_apps/blob/master/bindings/README.md)
+
+```
+git clone https://github.com/NVIDIA-AI-IOT/deepstream_python_apps.git
+cd deepstream_python_apps/bindings
+mkdir build
+cd build
+cmake ..  -DPYTHON_MAJOR_VERSION=3 -DPYTHON_MINOR_VERSION=6 \
+    -DPIP_PLATFORM=linux_aarch64 -DDS_PATH=/opt/nvidia/deepstream/deepstream-6.0/
+make
+
+pip3 install ./pyds-1.1.0-py3-none*.whl
+```
+
+- 将该项目全部搬到jetson的home目录下然后运行main.py即可

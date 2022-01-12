@@ -89,6 +89,10 @@ def input_args():
     """
     parser = argparse.ArgumentParser()
 
+    parser.add_argument("--cam_device", type=str, default="csi",
+                        help="CSI or USB")
+    parser.add_argument("--usb_id", type=str, default="/dev/video0",
+                        help="Set the cloud server's port")                    
     parser.add_argument("--sensor_id", type=int, default=0,
                         help="Set the cloud server's port")
     parser.add_argument("--port", type=int, default=1883,

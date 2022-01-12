@@ -224,17 +224,38 @@ def infer_main(args, stats_queue: mp.Queue = None, e_ready: mp.Event = None):
 
     # 添加CSI摄像头设备作为视频源输并设置输入摄像头设备的设备号
     print("Creating Source \n ")
-    source = Gst.ElementFactory.make("nvarguscamerasrc", "usb-cam-source")
-    if not source:
-        sys.stderr.write(" Unable to create Source \n")
-    
-    source.set_property("sensor-id", int(args.sensor_id))
-    source.set_property("bufapi-version", 1)
+
+    if args.cam_device == "usb":
+        source = Gst.ElementFactory.make("v4l2src", "usb-cam-source")
+        if not source:
+            sys.stderr.write(" Unable to create Source \n")
+        
+        source.set_property("device", args.usb_id)
+
+        nvvidconvsrc = Gst.ElementFactory.make("nvvideoconvert", "convertor_src2")
+        cam_property = "video/x-raw, format=(string)YUY2"
+
+    if args.cam_device == "csi":
+        source = Gst.ElementFactory.make("nvarguscamerasrc", "csi-cam-source")
+        if not source:
+            sys.stderr.write(" Unable to create Source \n")
+        
+        source.set_property("sensor-id", int(args.sensor_id))
+        source.set_property("bufapi-version", 1)
+
+        nvvidconvsrc = Gst.ElementFactory.make("nvvidconv", "convertor_src2")
+        if not nvvidconvsrc:
+            sys.stderr.write(" Unable to create Nvvideoconvert \n")
+
+        cam_property = "video/x-raw(memory:NVMM), framerate=29/1"
     
     # 创建摄像头滤波器，主要是为了传递视频数据
     caps_v4l2src = Gst.ElementFactory.make("capsfilter", "v4l2src_caps")
     if not caps_v4l2src:
         sys.stderr.write(" Unable to create v4l2src capsfilter \n")
+        
+    # caps_v4l2src.set_property('caps', Gst.Caps.from_string("video/x-raw(memory:NVMM), framerate=29/1"))
+    caps_v4l2src.set_property('caps', Gst.Caps.from_string(cam_property))
 
     # 创建视频数据格式转换器，将视频从一个色彩空间转换到另一个色彩空间
     print("Creating Video Converter \n")
@@ -242,13 +263,12 @@ def infer_main(args, stats_queue: mp.Queue = None, e_ready: mp.Event = None):
     if not vidconvsrc:
         sys.stderr.write(" Unable to create videoconvert \n")
 
-    nvvidconvsrc = Gst.ElementFactory.make("nvvidconv", "convertor_src2")
-    if not nvvidconvsrc:
-        sys.stderr.write(" Unable to create Nvvideoconvert \n")
+    
 
     caps_vidconvsrc = Gst.ElementFactory.make("capsfilter", "nvmm_caps")
     if not caps_vidconvsrc:
         sys.stderr.write(" Unable to create capsfilter \n")
+    caps_vidconvsrc.set_property('caps', Gst.Caps.from_string("video/x-raw(memory:NVMM)"))
 
     # 创建英伟达的视频流接收处理，可以从一个source或者多个source得到一批次的视频帧
     streammux = Gst.ElementFactory.make("nvstreammux", "Stream-muxer")
@@ -327,15 +347,15 @@ def infer_main(args, stats_queue: mp.Queue = None, e_ready: mp.Event = None):
 
     # 摄像头开始运行，并设置其图像宽度和高度以及采集的视频帧率
     print("Playing cam %s " % str(args.sensor_id))
-    caps_v4l2src.set_property('caps', Gst.Caps.from_string("video/x-raw(memory:NVMM), framerate=30/1"))
-    caps_vidconvsrc.set_property('caps', Gst.Caps.from_string("video/x-raw(memory:NVMM)"))
-    # source.set_property('device', args[1])
+    
+    
     streammux.set_property('width', 1920)
     streammux.set_property('height', 1080)
     streammux.set_property('batch-size', 1)
     streammux.set_property('batched-push-timeout', 1000000)
     # 设置检测算法配置文件的路径并载入
     pgie.set_property('config-file-path', "config_infer_primary_yoloV3_tiny.txt")
+    pgie.set_property("interval", 1)
     # Set sync = false to avoid late frame drops at the display-sink
     # sink.set_property('sync', False)
 

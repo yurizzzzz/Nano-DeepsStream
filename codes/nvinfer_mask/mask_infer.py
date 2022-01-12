@@ -219,19 +219,18 @@ def infer_main(args, stats_queue: mp.Queue = None, e_ready: mp.Event = None):
     print("Creating Pipeline \n ")
     pipeline = Gst.Pipeline()
 
+
     if not pipeline:
         sys.stderr.write(" Unable to create Pipeline \n")
-
-    # 添加CSI摄像头设备作为视频源输并设置输入摄像头设备的设备号
     print("Creating Source \n ")
 
+
+    # 选择USB摄像头输入或CSI摄像头输入
     if args.cam_device == "usb":
         source = Gst.ElementFactory.make("v4l2src", "usb-cam-source")
         if not source:
             sys.stderr.write(" Unable to create Source \n")
-        
         source.set_property("device", args.usb_id)
-
         nvvidconvsrc = Gst.ElementFactory.make("nvvideoconvert", "convertor_src2")
         cam_property = "video/x-raw, format=(string)YUY2"
 
@@ -264,7 +263,6 @@ def infer_main(args, stats_queue: mp.Queue = None, e_ready: mp.Event = None):
         sys.stderr.write(" Unable to create videoconvert \n")
 
     
-
     caps_vidconvsrc = Gst.ElementFactory.make("capsfilter", "nvmm_caps")
     if not caps_vidconvsrc:
         sys.stderr.write(" Unable to create capsfilter \n")
@@ -274,11 +272,17 @@ def infer_main(args, stats_queue: mp.Queue = None, e_ready: mp.Event = None):
     streammux = Gst.ElementFactory.make("nvstreammux", "Stream-muxer")
     if not streammux:
         sys.stderr.write(" Unable to create NvStreamMux \n")
+    streammux.set_property('width', 1920)
+    streammux.set_property('height', 1080)
+    streammux.set_property('batch-size', 1)
+    streammux.set_property('batched-push-timeout', 1000000)
 
     # 使用英伟达nvinfer来加速推理模型从而输出结果
     pgie = Gst.ElementFactory.make("nvinfer", "primary-inference")
     if not pgie:
         sys.stderr.write(" Unable to create pgie \n")
+    pgie.set_property('config-file-path', "config_infer_primary_yoloV3_tiny.txt")
+    pgie.set_property("interval", 1)
 
     # nvosd需要RGBA格式的数据，因此将数据格式从NV12转换到RGBA
     nvvidconv = Gst.ElementFactory.make("nvvideoconvert", "convertor")
@@ -295,11 +299,14 @@ def infer_main(args, stats_queue: mp.Queue = None, e_ready: mp.Event = None):
 
     # 创建传输视频流的队列
     queue0 = Gst.ElementFactory.make("queue")
+
     # 创建英伟达的视频转换器
     nvvidconv_postosd = Gst.ElementFactory.make("nvvideoconvert", "convertor_postosd")
+
     # 创建摄像头滤波器，主要是为了传递视频数据
     caps = Gst.ElementFactory.make("capsfilter", "filter")
     caps.set_property("caps", Gst.Caps.from_string("video/x-raw(memory:NVMM), format=I420"))
+
      # 创建英伟达的硬件编码器，使用H264编码
     encoder = Gst.ElementFactory.make("nvv4l2h264enc", "encoder")
     encoder.set_property("insert-sps-pps", True)
@@ -314,8 +321,10 @@ def infer_main(args, stats_queue: mp.Queue = None, e_ready: mp.Event = None):
 
     # 创建RTP数据包将H264编码转换为RTP数据包
     rtppay = Gst.ElementFactory.make("rtph264pay")
+
     # 创建流分支
     splitter_file_udp = Gst.ElementFactory.make("tee")
+
     # 创建传输UDP流队列
     queue_udp = Gst.ElementFactory.make("queue")
 
@@ -329,8 +338,10 @@ def infer_main(args, stats_queue: mp.Queue = None, e_ready: mp.Event = None):
 
     # 创建传输视频流的队列
     queue = Gst.ElementFactory.make("queue")
+
     # 创建视频流的H264编码参数
     h264parse = Gst.ElementFactory.make("h264parse")
+
     # 创建FLV视频流格式为了RTMP推流
     flvmux = Gst.ElementFactory.make("flvmux")
     flvmux.set_property("streamable", True)
@@ -348,14 +359,6 @@ def infer_main(args, stats_queue: mp.Queue = None, e_ready: mp.Event = None):
     # 摄像头开始运行，并设置其图像宽度和高度以及采集的视频帧率
     print("Playing cam %s " % str(args.sensor_id))
     
-    
-    streammux.set_property('width', 1920)
-    streammux.set_property('height', 1080)
-    streammux.set_property('batch-size', 1)
-    streammux.set_property('batched-push-timeout', 1000000)
-    # 设置检测算法配置文件的路径并载入
-    pgie.set_property('config-file-path', "config_infer_primary_yoloV3_tiny.txt")
-    pgie.set_property("interval", 1)
     # Set sync = false to avoid late frame drops at the display-sink
     # sink.set_property('sync', False)
 

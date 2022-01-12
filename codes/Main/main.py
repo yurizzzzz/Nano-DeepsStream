@@ -79,6 +79,9 @@ def input_args():
     """
     该函数为主程序传入需要的参数
     
+    @Param cam_device: 选择摄像头类型
+    @Param usb_id: USB摄像头的设备号
+    @Param sensor_id: CSI摄像头的设备号
     @Param port: 传入云服务器端的EMQX开放端口
     @Param sub_topic: MQTT对象订阅的主题
     @Param pub_topic: MQTT对象发布的主题关于异常告警

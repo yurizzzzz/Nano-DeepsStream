@@ -122,7 +122,7 @@ def draw_bounding_boxes(image, obj_meta, confidence):
     image = cv2.line(image, lineright_c1, lineright_c2, color, 4) 
     """
     image = cv2.rectangle(image, (left, top), (left+width, top+height), (255, 0, 0), 2)
-    image = cv2.putText(image, obj_name + ',C=' + str(confidence), (left - 10, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 1,
+    image = cv2.putText(image, obj_name, (left - 10, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 1,
                         (255, 0, 0, 0), 1)
     return image
 

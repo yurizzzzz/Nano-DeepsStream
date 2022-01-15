@@ -144,7 +144,8 @@ if __name__ == '__main__':
 
     while not external_interrupt.is_set():
         process_info(client, stats_queue, active_filesave_processes, args.pub_topic)
-        file_process.saveFile_start(args.file_period, args.file_duration, active_filesave_processes)
+        file_process.saveFile_start(args.file_period, args.file_duration, active_filesave_processes, client, args.pub_topic)
 
     for process in active_filesave_processes:
-        file_process.saveFile_end(process)
+        file_process.saveFile_end(process, client, args.pub_topic)
+    

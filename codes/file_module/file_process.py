@@ -13,6 +13,7 @@ from gi.repository import GObject, Gst, GLib
 from datetime import datetime, timedelta
 from file_module import filesaving
 import multiprocessing as mp
+from mqtt_module import mqtt_client
 import struct
 import socket
 import time
@@ -49,7 +50,7 @@ def saveFile_process(saveFile_name, udp_port):
     return filesave_process, interrupt_process
 
 
-def saveFile_end(active_process):
+def saveFile_end(active_process, client, pub_topic):
     """
     该函数中止视频文件保存进程并且在中止后根据是否保存的标识符去选择
     传输文件到远程服务器还是删除掉不保存的视频文件
@@ -66,6 +67,12 @@ def saveFile_end(active_process):
     # filepath = '/home/nvidia/Nano/video/output.mp4'
 
     if active_process["save_flag"] == True:
+        video_path = filepath.split('/')
+        video_path = video_path[-1]
+        new_path = '/home/' + video_path[0:4] + '/' + video_path[4:6] + '-' + video_path[6:8] + '/' + video_path[8:10] + '-' + video_path[10:12] + '/' + video_path
+        send_msg = {'Warning': 'NoMask', 'VideoPath': new_path}
+        mqtt_client.mqtt_publish(client, pub_topic, send_msg)
+        
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.connect(('101.43.152.188', 8888))
@@ -90,11 +97,13 @@ def saveFile_end(active_process):
                     break
                 s.send(data)
             s.close()
+        
+        
     else:
         os.remove(filepath)
 
 
-def saveFile_start(period, duration, active_filesave_processes):
+def saveFile_start(period, duration, active_filesave_processes, client, pub_topic):
     """
     该函数初始化视频文件保存进程，并且初始化开始时间，保存标志等参数
     并且根据保存时间，周期来决定是否终止或者开始新的视频文件保存进程
@@ -111,7 +120,7 @@ def saveFile_start(period, duration, active_filesave_processes):
 
     for idx, active_process in enumerate(active_filesave_processes):
         if datetime.now() - active_process["start_time"] >= duration:
-            saveFile_end(active_process)
+            saveFile_end(active_process, client, pub_topic)
             del active_filesave_processes[idx]
             return 
         if latest_start == None or active_process["start_time"] > latest_start:
@@ -122,6 +131,8 @@ def saveFile_start(period, duration, active_filesave_processes):
         if not os.path.exists("../warning_videos"):
             os.makedirs("../warning_videos")
         output_name = "../warning_videos/" + local_time + ".mp4"
+
+
         # output_name = "/home/nvidia/Nano/video/output.mp4"
         port = 8001
         file_process, file_interrupt = saveFile_process(output_name, port)

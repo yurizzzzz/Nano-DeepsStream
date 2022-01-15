@@ -119,7 +119,9 @@ def saveFile_start(period, duration, active_filesave_processes):
 
     if latest_start is None or (datetime.now() - latest_start >= period):
         local_time = time.strftime("%Y%m%d%H%M%S", time.localtime())
-        output_name = "/home/nvidia/Nano/video/" + local_time + ".mp4"
+        if not os.path.exists("../warning_videos"):
+            os.makedirs("../warning_videos")
+        output_name = "../warning_videos/" + local_time + ".mp4"
         # output_name = "/home/nvidia/Nano/video/output.mp4"
         port = 8001
         file_process, file_interrupt = saveFile_process(output_name, port)

@@ -19,12 +19,16 @@ from mqtt_module import mqtt_client
 from file_module import filesaving
 from file_module import file_process
 import multiprocessing as mp
+import numpy as np
 import argparse
 import struct
 import socket
+import time
 import pyds
 import sys
 import os
+import cv2
+
 
 
 CLASS_PERSON = 0
@@ -65,6 +69,8 @@ class Person:
 
     def __init__(self, count):
         self.count = count
+        self.warning_images_dir = None
+        self.warning_videos_dir = None
 
 
 def cb_add_statistics(cb_args):
@@ -80,12 +86,45 @@ def cb_add_statistics(cb_args):
 
     person, stats_queue  = cb_args
     num = person.count
+    path = person.warning_images_dir
     if not stats_queue.full():
-        stats_queue.put_nowait({"People_nums": num})
+        stats_queue.put_nowait({"People_nums": num, "warning_images_dir": path})
 
     # print("person num: ", num)
     # GLib.timeout_add_seconds(1, cb_add_statistics, cb_args)
     GLib.timeout_add(100, cb_add_statistics, cb_args)
+
+def draw_bounding_boxes(image, obj_meta, confidence):
+    label = ["mask", "nomask"]
+
+    confidence = '{0:.2f}'.format(confidence)
+    rect_params = obj_meta.rect_params
+    top = int(rect_params.top)
+    left = int(rect_params.left)
+    width = int(rect_params.width)
+    height = int(rect_params.height)
+    obj_name = label[obj_meta.class_id]
+    """ 
+    color = (255, 0, 0, 0)
+    w_percents = int(width * 0.05) if width > 100 else int(width * 0.1)
+    h_percents = int(height * 0.05) if height > 100 else int(height * 0.1)
+    linetop_c1 = (left + w_percents, top)
+    linetop_c2 = (left + width - w_percents, top)
+    image = cv2.line(image, linetop_c1, linetop_c2, color, 4)
+    linebot_c1 = (left + w_percents, top + height)
+    linebot_c2 = (left + width - w_percents, top + height)
+    image = cv2.line(image, linebot_c1, linebot_c2, color, 4)
+    lineleft_c1 = (left, top + h_percents)
+    lineleft_c2 = (left, top + height - h_percents)
+    image = cv2.line(image, lineleft_c1, lineleft_c2, color, 4)
+    lineright_c1 = (left + width, top + h_percents)
+    lineright_c2 = (left + width, top + height - h_percents)
+    image = cv2.line(image, lineright_c1, lineright_c2, color, 4) 
+    """
+    image = cv2.rectangle(image, (left, top), (left+width, top+height), (255, 0, 0), 2)
+    image = cv2.putText(image, obj_name + ',C=' + str(confidence), (left - 10, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                        (255, 0, 0, 0), 1)
+    return image
 
 
 def osd_sink_pad_buffer_probe(pad, info, cb_args):
@@ -151,6 +190,23 @@ def osd_sink_pad_buffer_probe(pad, info, cb_args):
             # ‘0’代表检测目标——人的类别ID，检测到就写入person目标类中的属性去
             if obj_meta.class_id == 1:
                 person.count += 1
+
+            if person.count % 30 == 0:
+                n_frame = pyds.get_nvds_buf_surface(hash(gst_buffer), frame_meta.batch_id)
+                n_frame = draw_bounding_boxes(n_frame, obj_meta, obj_meta.confidence)
+                frame_copy = np.array(n_frame, copy=True, order='C')
+                frame_copy = cv2.cvtColor(frame_copy, cv2.COLOR_RGBA2BGRA)
+                
+                if not os.path.exists("../warning_images"):
+                    os.makedirs("../warning_images")
+                local_time = time.strftime("%Y%m%d%H%M%S", time.localtime())
+                time_now = time.strftime("%Y,%m-%d,%H-%M", time.localtime())
+                time_now = time_now.split(',')
+                image_path = "/home/" + time_now[0] + '/' + time_now[1] + '/' + time_now[2] + '/' + local_time + ".jpg"
+                person.warning_images_dir = image_path
+                cv2.imwrite("../warning_images/" + local_time + ".jpg", frame_copy)
+
+
             # 遍历下一个检测到的目标
             try: 
                 l_obj=l_obj.next
@@ -246,7 +302,7 @@ def infer_main(args, stats_queue: mp.Queue = None, e_ready: mp.Event = None):
         if not nvvidconvsrc:
             sys.stderr.write(" Unable to create Nvvideoconvert \n")
 
-        cam_property = "video/x-raw(memory:NVMM), framerate=29/1"
+        cam_property = "video/x-raw(memory:NVMM), framerate=30/1"
     
     # 创建摄像头滤波器，主要是为了传递视频数据
     caps_v4l2src = Gst.ElementFactory.make("capsfilter", "v4l2src_caps")

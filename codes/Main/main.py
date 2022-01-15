@@ -57,6 +57,7 @@ def process_info(client, stats_queue, active_filesave_processes, pub_topic):
         statistics = stats_queue.get_nowait()
 
         person_nums = int(statistics["People_nums"])
+        path = statistics["warning_images_dir"]
         alert = False
         if person_nums % 30==0 and person_nums != 0:
             alert = True
@@ -71,7 +72,7 @@ def process_info(client, stats_queue, active_filesave_processes, pub_topic):
                 time_now = time.strftime("%Y,%m-%d,%H-%M", time.localtime())
                 time_now = time_now.split(',')
                 file_path = '/home/ubuntu/' + time_now[0] + '/' + time_now[1] + '/' + time_now[2]
-                send_msg = {'Warning': 'NoMask', 'Path': file_path}
+                send_msg = {'Warning': 'NoMask', 'ImagePath': path}
                 mqtt_client.mqtt_publish(client, pub_topic, send_msg)
 
 
